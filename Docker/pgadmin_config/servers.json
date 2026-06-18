@@ -1,0 +1,14 @@
+{
+    "Servers": {
+        "1": {
+            "Name": "Production Postgres",
+            "Group": "Servers",
+            "Host":  "infra-postgres",
+            "Port": "5432",
+            "Username": "app_user",
+            "DB":"app_db",
+            "PassWord": "app_password",
+            "SSLMode": "prefer"
+        }
+    }
+}

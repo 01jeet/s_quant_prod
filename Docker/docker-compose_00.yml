@@ -1,0 +1,314 @@
+services:
+  # --- INFRA SERVICES ---
+  valkey:
+    image: valkey/valkey:latest
+    container_name: valkey
+    restart: unless-stopped
+    # command: >
+    #   valkey-server --port 6379 --requirepass ${VALKEY_PASSWORD} --appendonly yes --save ""
+    sysctls:
+      net.core.somaxconn: 1024
+    command: >
+      valkey-server  --port 6379  --requirepass ${VALKEY_PASSWORD}  --appendonly yes  --save ""  --timeout 60  --maxclients 1000 --tcp-backlog 511
+    volumes:
+      - valkey_data:/data
+    ports:
+      - "${VALKEY_PORT}:6379"
+    networks:
+      - infra-network
+    environment:
+      TZ: ${TZ}
+    healthcheck:
+      test: [ "CMD-SHELL", "valkey-cli -a \"$VALKEY_PASSWORD\" ping | grep PONG" ]
+      interval: ${HEALTHCHECK_INTERVAL}
+      timeout: ${HEALTHCHECK_TIMEOUT}
+      retries: ${HEALTHCHECK_RETRIES}
+      start_period: ${HEALTHCHECK_START_PERIOD}
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=valkey
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${VALKEY_PASSWORD}
+    ports:
+      - "${REDIS_COMMANDER_PORT}:8081"
+    networks:
+      - infra-network
+
+  nats:
+    image: nats:latest
+    container_name: nats
+    restart: unless-stopped
+    command: >
+      -js -store_dir /data -user ${NATS_USER} -pass ${NATS_PASSWORD} -m 8222
+    volumes:
+      - nats_data:/data
+    ports:
+      - "${NATS_PORT}:4222"
+      - "${NATS_UIPORT}:8222"
+    networks:
+      - infra-network
+    environment:
+      TZ: ${TZ}
+
+  centrifugo:
+    image: centrifugo/centrifugo:v6
+    container_name: centrifugo
+    restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
+    volumes:
+      - ${CENTRIFUGO_CONFIG_PATH}:/centrifugo_config/centrifugo_config.json
+    environment:
+      - TZ=${TZ}
+    command: centrifugo -c /centrifugo_config/centrifugo_config.json
+    ports:
+      - "${CENTRIFUGO_PORT}:8000"
+    networks:
+      - infra-network
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: unless-stopped
+    depends_on:
+      infra-postgres:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    ports:
+      - "${PGADMIN_PORT}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ${PGADMIN_SERVER_CONFIG_PATH}:/pgadmin4/servers.json
+    networks:
+      - infra-network
+
+  infra-postgres:
+    image: postgres:latest
+    container_name: infra-postgres
+    restart: unless-stopped
+    ports:
+      - "${INFRA_POSTGRES_PORT}:5432"
+    environment:
+      POSTGRES_USER: ${INFRA_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${INFRA_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${INFRA_POSTGRES_DB}
+    volumes:
+      - infra_postgres_data:/var/lib/postgresql
+    networks:
+      - infra-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${INFRA_POSTGRES_USER}" ]
+      interval: ${HEALTHCHECK_INTERVAL}
+      timeout: ${HEALTHCHECK_TIMEOUT}
+      retries: ${HEALTHCHECK_RETRIES}
+      start_period: ${HEALTHCHECK_START_PERIOD}
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    restart: unless-stopped
+    ports:
+      - "${CLICKHOUSE_PORT}:8123"
+      - "${CLICKHOUSE_PORT_UI}:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    networks:
+      - infra-network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- --user=${CLICKHOUSE_USER} --password=${CLICKHOUSE_PASSWORD} 'http://localhost:8123/?query=SELECT%201' | grep -q 1 || exit 1" ]
+      interval: ${HEALTHCHECK_INTERVAL}
+      timeout: ${HEALTHCHECK_TIMEOUT}
+      retries: ${HEALTHCHECK_RETRIES}
+      start_period: ${HEALTHCHECK_START_PERIOD}
+
+  flower:
+    image: mher/flower:latest
+    container_name: flower
+    restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
+    ports:
+      - "${FLOWER_PORT}:5555"
+    environment:
+      TZ: ${TZ}
+    command:
+      - celery
+      - --broker=redis://:${VALKEY_PASSWORD}@${HOST}:6379/0
+      - flower
+      - --port=5555
+  # # --- TEMPORAL SERVICES ---
+  # temporal-postgresql:
+  #   image: postgres:16
+  #   container_name: temporal-postgresql
+  #   ports:
+  #     - "${POSTGRES_PORT}:5432"
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  #   networks:
+  #     - temporal-network
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER}" ]
+  #     interval: ${HEALTHCHECK_INTERVAL}
+  #     timeout: ${HEALTHCHECK_TIMEOUT}
+  #     retries: ${HEALTHCHECK_RETRIES}
+  #     start_period: ${HEALTHCHECK_START_PERIOD}
+
+  # elasticsearch:
+  #   image: elasticsearch:7.17.27
+  #   container_name: temporal-elasticsearch
+  #   ports:
+  #     - "${ELASTICSEARCH_PORT}:9200"
+  #   environment:
+  #     - discovery.type=single-node
+  #     - ES_JAVA_OPTS=-Xms256m -Xmx256m
+  #     - xpack.security.enabled=false
+  #     - cluster.routing.allocation.disk.threshold_enabled=true
+  #     - cluster.routing.allocation.disk.watermark.low=512mb
+  #     - cluster.routing.allocation.disk.watermark.high=256mb
+  #     - cluster.routing.allocation.disk.watermark.flood_stage=128mb
+  #   networks:
+  #     - temporal-network
+  #   volumes:
+  #     - elasticsearch-data:/usr/share/elasticsearch/data
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: [ "CMD-SHELL", "curl -f http://localhost:${ELASTICSEARCH_PORT}/_cluster/health?wait_for_status=yellow&timeout=1s || exit 1" ]
+  #     interval: ${HEALTHCHECK_INTERVAL}
+  #     timeout: ${HEALTHCHECK_TIMEOUT}
+  #     retries: ${HEALTHCHECK_RETRIES}
+  #     start_period: ${HEALTHCHECK_START_PERIOD}
+
+  # temporal-admin-tools:
+  #   image: temporalio/admin-tools:1.31.0
+  #   container_name: temporal-admin-tools
+  #   restart: on-failure:5
+  #   depends_on:
+  #     temporal-postgresql:
+  #       condition: service_healthy
+  #     elasticsearch:
+  #       condition: service_healthy
+  #   environment:
+  #     DB: postgres12
+  #     DB_PORT: 5432
+  #     POSTGRES_USER: ${POSTGRES_USER}
+  #     POSTGRES_PWD: ${POSTGRES_PASSWORD}
+  #     POSTGRES_SEEDS: temporal-postgresql
+  #     SQL_PASSWORD: ${POSTGRES_PASSWORD}
+  #     ES_HOST: elasticsearch
+  #     ES_PORT: ${ELASTICSEARCH_PORT}
+  #     ES_SCHEME: http
+  #     ES_VERSION: v7
+  #     ES_VISIBILITY_INDEX: temporal_visibility_v1_dev
+  #   networks:
+  #     - temporal-network
+  #   volumes:
+  #     - ./temporal_config:/scripts
+  #   entrypoint: [ "/bin/sh" ]
+  #   command: /scripts/setup-postgres-es.sh
+
+  # temporal:
+  #   image: temporalio/server:1.30.1
+  #   container_name: temporal
+  #   depends_on:
+  #     temporal-admin-tools:
+  #       condition: service_completed_successfully
+  #   environment:
+  #     DB: postgres12
+  #     DB_PORT: 5432
+  #     POSTGRES_USER: ${POSTGRES_USER}
+  #     POSTGRES_PWD: ${POSTGRES_PASSWORD}
+  #     POSTGRES_SEEDS: temporal-postgresql
+  #     ENABLE_ES: true
+  #     ES_SEEDS: elasticsearch
+  #     ES_VERSION: v7
+  #     BIND_ON_IP: ${BIND_IP}
+  #     DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/config/dynamicconfig/development-sql.yaml
+  #   networks:
+  #     - temporal-network
+  #   ports:
+  #     - "${TEMPORAL_PORT}:7233"
+  #   volumes:
+  #     - ./temporal_config:/etc/temporal/config/dynamicconfig
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: [ "CMD", "nc", "-z", "localhost", "7233" ]
+  #     interval: ${HEALTHCHECK_INTERVAL}
+  #     timeout: ${HEALTHCHECK_TIMEOUT}
+  #     start_period: ${HEALTHCHECK_START_PERIOD}
+  #     retries: ${HEALTHCHECK_RETRIES}
+
+  # temporal-create-namespace:
+  #   image: temporalio/admin-tools:1.31.0
+  #   container_name: temporal-create-namespace
+  #   restart: on-failure:5
+  #   depends_on:
+  #     temporal:
+  #       condition: service_healthy
+  #   environment:
+  #     TEMPORAL_ADDRESS: temporal:7233
+  #     DEFAULT_NAMESPACE: ${DEFAULT_NAMESPACE}
+  #   networks:
+  #     - temporal-network
+  #   volumes:
+  #     - ./temporal_config:/scripts
+  #   entrypoint: [ "/bin/sh" ]
+  #   command: /scripts/create-namespace.sh
+
+  # temporal-ui:
+  #   image: temporalio/ui:2.49.1
+  #   container_name: temporal-ui
+  #   restart: unless-stopped
+  #   depends_on:
+  #     temporal-create-namespace:
+  #       condition: service_completed_successfully
+  #   environment:
+  #     TEMPORAL_ADDRESS: temporal:7233
+  #     TEMPORAL_CORS_ORIGINS: ${TEMPORAL_UI_CORS}
+  #   networks:
+  #     - temporal-network
+  #   ports:
+  #     - "${TEMPORAL_UI_PORT}:8080"
+
+volumes:
+  valkey_data:
+  nats_data:
+  pgadmin_data:
+  infra_postgres_data:
+  clickhouse_data:
+  clickhouse_logs:
+  postgres-data:
+    # elasticsearch-data:
+
+networks:
+  infra-network:
+    driver: bridge
+  temporal-network:
+    driver: bridge
