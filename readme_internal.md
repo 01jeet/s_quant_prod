@@ -1,8 +1,10 @@
-# s_quant_prod
+<p align="center">
+  <h1><b>S_QUANT_PROD</b></h1>
+  <br>
+  <h2><b>INTERNAL USE ONLY</b></h2>
+</p>
 
-## INTERNAL USE ONLY
-
-1. **git initialization**:
+### Git Initialization
 ```sh
 this is for the repo --> https://github.com/01jeet/s_quant_prod.git
 
@@ -17,15 +19,16 @@ git push -u origin main
 if fails use this
 git push --force -u origin main
 
-end
+```
 
-2. **create new folders**:
+### Create new folders
     ```sh
     create new folders
     New-Item -ItemType Directory -Name services
     New-Item -ItemType File -Path services/__init__.py
+    ```
     
-3. **Clean up Python caches and temporary tool folders**:
+### Clean up Python caches and temporary tool folders
 ```sh
 
 # 1. Clean up Python caches and temporary tool folders
@@ -50,4 +53,15 @@ uv sync
 Write-Host "Success! Environment is clean and synced." -ForegroundColor Green
 #end
 
+```
 
+### A Small test
+```sh
+  
+  uv run ruff check .
+  uv run ruff check . --fix
+  uv run ruff format .
+  uv run pylint .
+  uv run pytest
+
+```

@@ -4,4 +4,20 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.137.2",
+    "loguru>=0.7.3",
+    "pathlib>=1.0.1",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
+    "typing>=3.10.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "logging>=0.4.9.6",
+    "pylint>=4.0.6",
+    "pytest>=9.1.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.18",
+]
